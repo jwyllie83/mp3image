@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+
+__doc__ = """
+Simple tool to add or replace images in Mp3 files, according to the ID3v2.3 tag
+standard (that used by most mondern mp3 clients).
+"""
+
+import sys
+
+def err(error_message):
+	sys.stderr.write(error_message + '\n')
+	sys.exit(1)
+
+try:
+	import argparse
+except ImportError, e:
+	err('Unable to import argparse: please install with: sudo pip install argparse')
+
+try:
+	import tagger
+except ImportError, e:
+	err('Unable to import pytagger: please install with: sudo pip install pytagger')
+
+def main():
+	the_parser = argparse.ArgumentParser(description=__doc__)
+	the_parser.add_argument('-i', '--image', metavar='IMAGEFILE', dest='image', required=True, help='Location to an image file.')
+	the_parser.add_argument('files', metavar='file', nargs='+', type=str, help='Files to add or replace image information')
+
+	options = the_parser.parse_args()
+
+	################################################################
+	# We only support JPEG files; make sure it's a JPEG file...
+	################################################################
+
+	magic_number = open(options.image).read(2)
+	if magic_number != '\xff\xd8':
+		err('Invalid image file; image file needs to be a JPEG file')
+		sys.exit(1)
+
+	for mp3_file in options.files:
+		try:
+			tag = tagger.ID3v2(mp3_file)
+		except IOError, e:
+			err('File does not exist: %s' % mp3_file)
+
+		apic_fid = 'APIC'
+		if tag.version == 2.2:
+			apic_fid = 'PIC'
+
+		################################################################
+		# First, find and any old APIC frame...
+		################################################################
+
+		try:
+			old_apic_frame = [frame for frame in tag.frames if frame.fid == apic_fid][0]
+			tag.frames.remove(old_apic_frame)
+		except IndexError, e:
+			pass
+
+		################################################################
+		# ... then, add the new frame...
+		# (this code largely from:)
+		# http://code.google.com/p/liquidx/source/browse/pytagger/trunk/apic.py
+		################################################################
+    
+		apic = tag.new_frame(fid=apic_fid)
+
+		# What's up with these encodings and such?  Latin-1?
+		apic.encoding = 'latin_1'
+		apic.mimetype = 'image/jpeg'
+		apic.picttype = 0
+		apic.desc = ''
+		apic.pict = open(options.image).read()
+
+		# replace apic frame
+		tag.frames = [frame for frame in tag.frames if frame.fid != apic_fid]
+		tag.frames.append(apic)
+		tag.commit()
+
+
+if __name__ == '__main__':
+	main()
